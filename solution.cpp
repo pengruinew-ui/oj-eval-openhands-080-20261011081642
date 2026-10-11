@@ -1,7 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
-#include <unordered_set>
+#include <stack>
 using namespace std;
 
 const int MAXN = 100005;
@@ -11,77 +11,103 @@ vector<int> adj[MAXN];
 int tin[MAXN], low[MAXN];
 bool visited[MAXN];
 int timer;
-unordered_set<long long> bridges;
+vector<vector<int>> biconnected_components;
+vector<int> current_component;
+stack<int> vertex_stack;
+int component_id[MAXN];
+int current_component_id;
 
-long long edge_hash(int u, int v) {
-    if (u > v) swap(u, v);
-    return (long long)u * 1000000 + v;
-}
-
-void find_bridges(int v, int parent = -1) {
+void find_biconnected_components(int v, int parent = -1) {
     visited[v] = true;
     tin[v] = low[v] = timer++;
+    vertex_stack.push(v);
+    int children = 0;
     
     for (int to : adj[v]) {
         if (to == parent) continue;
         if (visited[to]) {
             low[v] = min(low[v], tin[to]);
         } else {
-            find_bridges(to, v);
+            children++;
+            find_biconnected_components(to, v);
             low[v] = min(low[v], low[to]);
-            if (low[to] > tin[v]) {
-                bridges.insert(edge_hash(v, to));
-            }
-        }
-    }
-}
-
-int component_id[MAXN];
-int current_component;
-
-void dfs_component(int v) {
-    component_id[v] = current_component;
-    for (int to : adj[v]) {
-        if (component_id[to] == -1 && bridges.find(edge_hash(v, to)) == bridges.end()) {
-            dfs_component(to);
-        }
-    }
-}
-
-int color[MAXN];
-vector<int> component_vertices;
-
-bool is_bipartite_component(int start_v) {
-    component_vertices.clear();
-    
-    // BFS to check bipartite and collect vertices
-    vector<int> q;
-    q.push_back(start_v);
-    color[start_v] = 0;
-    component_vertices.push_back(start_v);
-    
-    int bipartite = true;
-    
-    while (!q.empty()) {
-        int v = q.front();
-        q.erase(q.begin());
-        
-        for (int to : adj[v]) {
-            // Skip if different component or bridge
-            if (component_id[to] != component_id[start_v]) continue;
-            if (bridges.find(edge_hash(v, to)) != bridges.end()) continue;
             
-            if (color[to] == -1) {
-                color[to] = color[v] ^ 1;
-                component_vertices.push_back(to);
-                q.push_back(to);
-            } else if (color[to] == color[v]) {
-                bipartite = false;
+            if (low[to] >= tin[v]) {
+                // Found a biconnected component
+                current_component.clear();
+                int u;
+                do {
+                    u = vertex_stack.top();
+                    vertex_stack.pop();
+                    current_component.push_back(u);
+                } while (u != to);
+                current_component.push_back(v);
+                biconnected_components.push_back(current_component);
             }
         }
     }
     
-    return bipartite;
+    // Handle root vertex
+    if (parent == -1 && children == 0) {
+        current_component.clear();
+        current_component.push_back(v);
+        biconnected_components.push_back(current_component);
+    }
+}
+
+bool can_be_invited[MAXN];
+
+void check_component(const vector<int>& component) {
+    if (component.size() < 3) return;
+    
+    // Build subgraph for this component
+    vector<int> local_id(MAXN, -1);
+    for (int i = 0; i < component.size(); i++) {
+        local_id[component[i]] = i;
+    }
+    
+    vector<vector<int>> sub_adj(component.size());
+    for (int v : component) {
+        for (int to : adj[v]) {
+            if (local_id[to] != -1) {
+                sub_adj[local_id[v]].push_back(local_id[to]);
+            }
+        }
+    }
+    
+    // Check if this component is non-bipartite
+    vector<int> color(component.size(), -1);
+    bool is_non_bipartite = false;
+    
+    for (int i = 0; i < component.size() && !is_non_bipartite; i++) {
+        if (color[i] == -1) {
+            vector<int> q;
+            q.push_back(i);
+            color[i] = 0;
+            
+            while (!q.empty() && !is_non_bipartite) {
+                int v = q.front();
+                q.erase(q.begin());
+                
+                for (int to : sub_adj[v]) {
+                    if (color[to] == -1) {
+                        color[to] = color[v] ^ 1;
+                        q.push_back(to);
+                    } else if (color[to] == color[v]) {
+                        is_non_bipartite = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    // If non-bipartite, all vertices in this component can be invited
+    if (is_non_bipartite) {
+        for (int v : component) {
+            can_be_invited[v] = true;
+        }
+    }
 }
 
 int main() {
@@ -98,47 +124,34 @@ int main() {
         adj[y].push_back(x);
     }
     
-    // Find all bridges
+    // Initialize
+    fill(can_be_invited, can_be_invited + n + 1, false);
     timer = 0;
+    fill(visited, visited + n + 1, false);
+    biconnected_components.clear();
+    while (!vertex_stack.empty()) vertex_stack.pop();
+    
+    // Find all biconnected components
     for (int i = 1; i <= n; i++) {
         if (!visited[i]) {
-            find_bridges(i);
+            find_biconnected_components(i);
+            // Clear remaining vertices in stack
+            while (!vertex_stack.empty()) {
+                vertex_stack.pop();
+            }
         }
     }
     
-    // Find bridge-connected components
-    fill(component_id, component_id + n + 1, -1);
-    current_component = 0;
-    for (int i = 1; i <= n; i++) {
-        if (component_id[i] == -1) {
-            current_component++;
-            dfs_component(i);
-        }
+    // Check each biconnected component
+    for (const auto& component : biconnected_components) {
+        check_component(component);
     }
     
-    // For each component, check if it's bipartite
-    fill(color, color + n + 1, -1);
+    // Count vertices that cannot be invited
     int answer = 0;
-    
-    for (int comp = 1; comp <= current_component; comp++) {
-        // Find a vertex in this component
-        int start_v = -1;
-        for (int i = 1; i <= n; i++) {
-            if (component_id[i] == comp) {
-                start_v = i;
-                break;
-            }
-        }
-        
-        if (start_v == -1) continue;
-        
-        if (is_bipartite_component(start_v)) {
-            // This component is bipartite, so all vertices in it cannot be invited
-            for (int i = 1; i <= n; i++) {
-                if (component_id[i] == comp) {
-                    answer++;
-                }
-            }
+    for (int i = 1; i <= n; i++) {
+        if (!can_be_invited[i]) {
+            answer++;
         }
     }
     
