@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <unordered_set>
 using namespace std;
 
 const int MAXN = 100005;
@@ -10,7 +11,12 @@ vector<int> adj[MAXN];
 int tin[MAXN], low[MAXN];
 bool visited[MAXN];
 int timer;
-vector<pair<int, int>> bridges;
+unordered_set<long long> bridges;
+
+long long edge_hash(int u, int v) {
+    if (u > v) swap(u, v);
+    return (long long)u * 1000000 + v;
+}
 
 void find_bridges(int v, int parent = -1) {
     visited[v] = true;
@@ -24,7 +30,7 @@ void find_bridges(int v, int parent = -1) {
             find_bridges(to, v);
             low[v] = min(low[v], low[to]);
             if (low[to] > tin[v]) {
-                bridges.push_back({min(v, to), max(v, to)});
+                bridges.insert(edge_hash(v, to));
             }
         }
     }
@@ -36,19 +42,8 @@ int current_component;
 void dfs_component(int v) {
     component_id[v] = current_component;
     for (int to : adj[v]) {
-        if (component_id[to] == -1) {
-            // Check if this edge is a bridge
-            bool is_bridge = false;
-            int a = min(v, to), b = max(v, to);
-            for (auto &bridge : bridges) {
-                if (bridge.first == a && bridge.second == b) {
-                    is_bridge = true;
-                    break;
-                }
-            }
-            if (!is_bridge) {
-                dfs_component(to);
-            }
+        if (component_id[to] == -1 && bridges.find(edge_hash(v, to)) == bridges.end()) {
+            dfs_component(to);
         }
     }
 }
@@ -65,6 +60,8 @@ bool is_bipartite_component(int start_v) {
     color[start_v] = 0;
     component_vertices.push_back(start_v);
     
+    int bipartite = true;
+    
     while (!q.empty()) {
         int v = q.front();
         q.erase(q.begin());
@@ -72,51 +69,19 @@ bool is_bipartite_component(int start_v) {
         for (int to : adj[v]) {
             // Skip if different component or bridge
             if (component_id[to] != component_id[start_v]) continue;
-            
-            int a = min(v, to), b = max(v, to);
-            bool is_bridge = false;
-            for (auto &bridge : bridges) {
-                if (bridge.first == a && bridge.second == b) {
-                    is_bridge = true;
-                    break;
-                }
-            }
-            if (is_bridge) continue;
+            if (bridges.find(edge_hash(v, to)) != bridges.end()) continue;
             
             if (color[to] == -1) {
                 color[to] = color[v] ^ 1;
                 component_vertices.push_back(to);
                 q.push_back(to);
             } else if (color[to] == color[v]) {
-                // Found odd cycle, but we still need to collect all vertices
-                // Continue BFS to get all vertices in this component
-                continue;
+                bipartite = false;
             }
         }
     }
     
-    // Check if component is bipartite
-    for (int v : component_vertices) {
-        for (int to : adj[v]) {
-            if (component_id[to] != component_id[start_v]) continue;
-            
-            int a = min(v, to), b = max(v, to);
-            bool is_bridge = false;
-            for (auto &bridge : bridges) {
-                if (bridge.first == a && bridge.second == b) {
-                    is_bridge = true;
-                    break;
-                }
-            }
-            if (is_bridge) continue;
-            
-            if (color[v] == color[to]) {
-                return false; // Not bipartite
-            }
-        }
-    }
-    
-    return true; // Bipartite
+    return bipartite;
 }
 
 int main() {
